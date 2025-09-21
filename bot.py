@@ -583,7 +583,94 @@ def set_webhook_route():
 
 
 # ------------ Запуск (локальный режим — для отладки) ------------
+# Универсальный запуск: polling (локально) или webhook (Render/Heroku)
+# Поведение управляется переменными окружения:
+# MODE = "polling"  -> запускаем bot.polling() (локально, без webhook)
+# MODE = "webhook"  -> устанавливаем webhook на RENDER_EXTERNAL_URL и запускаем Flask server
+# AUTO_START_ANALYSIS = "1" -> автоматически стартовать мониторинг live-матчей при запуске (требуется ADMIN_CHAT_ID)
+# ADMIN_CHAT_ID -> chat_id, куда слать уведомления (и куда будет привязан мониторинг при автозапуске)
+
+MODE = os.getenv("MODE", "webhook").lower()
+AUTO_START = os.getenv("AUTO_START_ANALYSIS", "0") == "1"
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+
+def _maybe_start_monitor_on_startup():
+    """Если требуется автоматический старт мониторинга — запускаем его в фоне для ADMIN_CHAT_ID."""
+    global analyzing, monitor_task_future
+    if not AUTO_START:
+        return
+    if analyzing:
+        return
+    if not ADMIN_CHAT_ID:
+        try:
+            print("AUTO_START_ANALYSIS=1 задан, но ADMIN_CHAT_ID не указан — пропускаю автозапуск.")
+        except Exception:
+            pass
+        return
+    try:
+        analyzing = True
+        # запуск в фоне
+        monitor_task_future = run_coro(monitor_all_games(int(ADMIN_CHAT_ID)))
+        try:
+            bot.send_message(int(ADMIN_CHAT_ID), "✅ Авто-старт мониторинга: запуск мониторинга live-матчей.")
+        except Exception:
+            pass
+    except Exception as exc:
+        try:
+            print("Ошибка при автозапуске мониторинга:", exc)
+        except Exception:
+            pass
+
 if __name__ == "__main__":
-    init_db()
-    # если запускаешь локально без webhook, можно включить polling (не рекомендуем на Render)
-    server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # инициализируем БД перед стартом
+    try:
+        init_db()
+    except Exception as exc:
+        print("Ошибка init_db:", exc)
+
+    # Режим polling: удобно для локальной отладки (MODE=polling)
+    if MODE == "polling":
+        try:
+            # Удаляем webhook, чтобы polling работал стабильно
+            try:
+                bot.remove_webhook()
+            except Exception:
+                pass
+            _maybe_start_monitor_on_startup()
+            print("Запуск в режиме polling...")
+            # polling блокирует текущий поток — удобно для локальной разработки
+            try:
+                bot.infinity_polling(timeout=60, long_polling_timeout=60)
+            except AttributeError:
+                # в старых версиях pyTelegramBotAPI может быть polling()
+                bot.polling(none_stop=True)
+        except Exception as exc:
+            print("Ошибка запуска polling:", exc)
+    else:
+        # Режим webhook (по умолчанию) — для Render/Heroku и подобных платформ
+        try:
+            # Пытаемся установить webhook (если указан RENDER_EXTERNAL_URL)
+            if RENDER_EXTERNAL_URL:
+                try:
+                    bot.remove_webhook()
+                except Exception:
+                    pass
+                url = RENDER_EXTERNAL_URL.rstrip("/") + "/" + TOKEN
+                try:
+                    bot.set_webhook(url=url)
+                    print("Webhook установлен:", url)
+                except Exception as exc:
+                    print("Не удалось установить webhook:", exc)
+            else:
+                print("RENDER_EXTERNAL_URL не задан; запускаем Flask сервер без установки webhook.")
+        except Exception as exc:
+            print("Ошибка при установке webhook:", exc)
+
+        # Если нужно — автозапуск мониторинга
+        _maybe_start_monitor_on_startup()
+
+        # Запускаем Flask сервер (не блокируемся дополнительно)
+        try:
+            server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+        except Exception as exc:
+            print("Ошибка запуска Flask server:", exc)
