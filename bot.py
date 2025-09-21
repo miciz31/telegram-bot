@@ -1,16 +1,27 @@
-import telebot
+import os
+from flask import Flask, request
+import requests
 
-# Твой токен
-TOKEN = "8419381170:AAHKGCEs2ay4t9Vr3EU30U4CkCuUNI-s3eo"
-bot = telebot.TeleBot(TOKEN)
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+URL = f"https://api.telegram.org/bot{TOKEN}/"
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message, "Привет! Бот работает ✅")
+app = Flask(__name__)
 
-@bot.message_handler(func=lambda message: True)
-def echo(message):
-    bot.reply_to(message, f"Ты написал: {message.text}")
+def send_message(chat_id, text):
+    requests.post(URL + "sendMessage", data={"chat_id": chat_id, "text": text})
 
-print("Бот запущен...")
-bot.infinity_polling()
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = request.get_json()
+    if "message" in update and "text" in update["message"]:
+        chat_id = update["message"]["chat"]["id"]
+        text = update["message"]["text"]
+        send_message(chat_id, f"Ты написал: {text}")
+    return "ok", 200
+
+@app.route("/", methods=["GET"])
+def index():
+    return "Bot is running!", 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
