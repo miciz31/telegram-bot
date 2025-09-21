@@ -1,33 +1,31 @@
 import os
+import telebot
 from flask import Flask, request
-import requests
 
-# токен бота берём из переменной окружения
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-URL = f"https://api.telegram.org/bot{TOKEN}/"
+TOKEN = os.getenv("BOT_TOKEN")
+bot = telebot.TeleBot(TOKEN)
+server = Flask(__name__)
 
-app = Flask(__name__)
+@bot.message_handler(commands=['start'])
+def start_message(message):
+    bot.reply_to(message, "Бот запущен ✅")
 
-# функция отправки сообщения
-def send_message(chat_id, text):
-    requests.post(URL + "sendMessage", data={"chat_id": chat_id, "text": text})
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    bot.reply_to(message, message.text)
 
-# обработка вебхука
-@app.route("/webhook", methods=["POST"])
+@server.route(f"/{TOKEN}", methods=["POST"])
+def getMessage():
+    bot.process_new_updates(
+        [telebot.types.Update.de_json(request.stream.read().decode("utf-8"))]
+    )
+    return "!", 200
+
+@server.route("/")
 def webhook():
-    update = request.get_json()
-
-    if "message" in update and "text" in update["message"]:
-        chat_id = update["message"]["chat"]["id"]
-        text = update["message"]["text"]
-        send_message(chat_id, f"Ты написал: {text}")
-
-    return "ok", 200
-
-# проверка что сервер жив
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot is running!", 200
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{os.getenv('RENDER_EXTERNAL_URL')}/{TOKEN}")
+    return "Webhook set!", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
