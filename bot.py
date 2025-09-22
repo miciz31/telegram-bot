@@ -1,3 +1,5 @@
+from telegram import Update
+from telegram.ext import CallbackContext
 # bot.py
 import os
 import time
