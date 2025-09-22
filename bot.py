@@ -36,7 +36,48 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
-import aiohttp
+
+# aiohttp fallback: если aiohttp не установлен, используем requests в async-обёртке
+try:
+    import aiohttp
+except Exception:
+    aiohttp = None
+    import requests, types, asyncio
+    class _SimpleResponse:
+        def __init__(self, r):
+            self._r = r
+            self.status = r.status_code
+        async def text(self):
+            return self._r.text
+        async def json(self):
+            # Может выбросить, но пусть будет
+            return self._r.json()
+        async def read(self):
+            return self._r.content
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class SimpleClientSession:
+        def __init__(self):
+            self._s = requests.Session()
+        async def get(self, url, **kwargs):
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: self._s.get(url, **kwargs))
+            return _SimpleResponse(resp)
+        async def post(self, url, **kwargs):
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: self._s.post(url, **kwargs))
+            return _SimpleResponse(resp)
+        async def close(self):
+            try:
+                await asyncio.get_event_loop().run_in_executor(None, self._s.close)
+            except Exception:
+                pass
+
+    aiohttp = types.SimpleNamespace(ClientSession=SimpleClientSession)
+
 import telebot
 from flask import Flask, request
 
