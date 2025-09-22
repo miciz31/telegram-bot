@@ -3,6 +3,32 @@ import os
 import time
 import json
 import threading
+
+import logging
+
+# Логирование в файл matches.log
+logging.basicConfig(
+    filename="matches.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(message)s"
+)
+
+# Функция для записи проверки матча
+def log_match(match_name, status="checked"):
+    logging.info(f"{match_name} - {status}")
+
+# Команда /checked для просмотра последних матчей
+def checked(update: Update, context: CallbackContext):
+    try:
+        with open("matches.log", "r", encoding="utf-8") as f:
+            lines = f.readlines()[-10:]  # последние 10 записей
+        if not lines:
+            update.message.reply_text("Пока нет проверенных матчей.")
+        else:
+            update.message.reply_text("Последние проверки:\n" + "".join(lines))
+    except FileNotFoundError:
+        update.message.reply_text("Лог-файл ещё не создан.")
+
 import asyncio
 import sqlite3
 from datetime import datetime
